@@ -23,3 +23,6 @@ Thumbs.db
 *.faiss
 *.pkl
 *.pickle
+
+.streamlit/secrets.toml
+

@@ -1,8 +1,11 @@
+streamlit
+python-dotenv
 youtube-transcript-api
 langchain
 langchain-community
-langchain-google-genai
+langchain-core
 langchain-text-splitters
-faiss-cpu
+langchain-google-genai
 sentence-transformers
-python-dotenv
+faiss-cpu
+torch

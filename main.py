@@ -1,4 +1,5 @@
 import os
+import re
 
 from dotenv import load_dotenv
 
@@ -23,21 +24,32 @@ from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
 
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL")
 
 
-if not GEMINI_API_KEY:
-    raise EnvironmentError("GEMINI_API_KEY is missing")
+def get_video_id(youtube_url: str) -> str:
 
-if not GEMINI_MODEL:
-    raise EnvironmentError("GEMINI_MODEL is missing")
+    patterns = [
+        r"(?:youtube\.com/watch\?v=)([^&]+)",
+        r"(?:youtu\.be/)([^?&]+)",
+        r"(?:youtube\.com/shorts/)([^?&]+)",
+        r"(?:youtube\.com/embed/)([^?&]+)"
+    ]
 
-# transcript nikaalo from video id
+    for pattern in patterns:
+        match = re.search(pattern, youtube_url)
+
+        if match:
+            return match.group(1)
+
+    raise ValueError("Invalid YouTube URL")
+
+
 def get_video_transcript(video_id: str) -> str:
 
     try:
+
         transcript_data = YouTubeTranscriptApi().fetch(
             video_id,
             languages=["en"]
@@ -47,6 +59,9 @@ def get_video_transcript(video_id: str) -> str:
             item.text if hasattr(item, "text") else item["text"]
             for item in transcript_data
         )
+
+        if not transcript.strip():
+            raise RuntimeError("Transcript is empty.")
 
         return transcript
 
@@ -60,7 +75,7 @@ def get_video_transcript(video_id: str) -> str:
             f"Could not fetch transcript: {exc}"
         )
 
-# if transcript is too big, create chunks of 1000
+
 def create_chunks(transcript: str):
 
     splitter = RecursiveCharacterTextSplitter(
@@ -75,24 +90,25 @@ def create_chunks(transcript: str):
 
     return chunks
 
-# vector embeddings banao ab
-def create_vector_store(chunks):
 
-    embeddings = HuggingFaceEmbeddings(
+def create_embeddings():
+
+    return HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    vector_store = FAISS.from_documents(
+
+def create_vector_store(chunks, embeddings):
+
+    return FAISS.from_documents(
         chunks,
         embeddings
     )
 
-    return vector_store
 
-# top 4 relevant + diverse chunks retrieve honge
 def create_retriever(vector_store):
 
-    retriever = vector_store.as_retriever(
+    return vector_store.as_retriever(
         search_type="mmr",
         search_kwargs={
             "k": 4,
@@ -101,64 +117,68 @@ def create_retriever(vector_store):
         }
     )
 
-    return retriever
 
-# initialize LLM
 def create_llm():
 
-    llm = ChatGoogleGenerativeAI(
+    if not GEMINI_API_KEY:
+        raise EnvironmentError("GEMINI_API_KEY is missing")
+
+    if not GEMINI_MODEL:
+        raise EnvironmentError("GEMINI_MODEL is missing")
+
+    return ChatGoogleGenerativeAI(
         model=GEMINI_MODEL,
         temperature=0.2,
         google_api_key=GEMINI_API_KEY
     )
 
-    return llm
 
-# chain bana do to connect all dots
 def create_rag_chain(retriever, llm, chat_history):
+
     prompt = ChatPromptTemplate.from_template(
         """
-    You are an AI assistant answering questions about a YouTube video.
+        You are an AI assistant answering questions about a YouTube video.
 
-    Use the video context as the primary source of information.
+        Use the video context as the primary source of information.
 
-    Rules:
-    1. If the answer is available in the video context, use the video context.
-    2. If the video context does not contain the answer, you may use your
-       general knowledge to provide a helpful answer.
-    3. Never claim that information from general knowledge was stated in the video.
-    4. Use the conversation history to understand follow-up questions.
-    5. If the question is ambiguous, use the conversation history to understand
-       what the user is referring to.
-    6. Give a clear, accurate and helpful answer.
+        Rules:
+        1. If the answer is available in the video context, use it.
+        2. If the context does not contain the answer, use general knowledge.
+        3. Never claim general knowledge was stated in the video.
+        4. Use conversation history for follow-up questions.
+        5. Give clear, accurate and helpful answers.
 
-    Conversation History:
-    {history}
+        Conversation History:
+        {history}
 
-    Video Context:
-    {context}
+        Video Context:
+        {context}
 
-    Question:
-    {question}
+        Question:
+        {question}
 
-    Answer:
-    """
+        Answer:
+        """
     )
 
     def format_docs(documents):
+
         return "\n\n".join(
             document.page_content
             for document in documents
         )
 
     def format_history():
+
         return "\n".join(
             f"{message.type}: {message.content}"
             for message in chat_history.messages
         )
 
     def retrieve_context(question):
+
         documents = retriever.invoke(question)
+
         return format_docs(documents)
 
     chain = (
@@ -174,89 +194,48 @@ def create_rag_chain(retriever, llm, chat_history):
 
     return chain
 
-chat_history = InMemoryChatMessageHistory()
 
-def main():
+def initialize_rag(youtube_url: str):
 
-    # YouTube video ID
-    youtube_url = input("Enter YouTube video URL: ")
-    if "youtu.be/" in youtube_url:
-        video_id = youtube_url.split("youtu.be/")[1].split("?")[0]
-    else:
-        video_id = youtube_url.split("v=")[1].split("&")[0]
-
-    print("Fetching transcript...")
+    video_id = get_video_id(youtube_url)
 
     transcript = get_video_transcript(video_id)
 
-    print(
-        f"Transcript fetched: {len(transcript)} characters"
-    )
-
-
-    # Create chunks
-    print("Creating chunks...")
-
     chunks = create_chunks(transcript)
 
-    print(
-        f"Created {len(chunks)} chunks"
+    embeddings = create_embeddings()
+
+    vector_store = create_vector_store(
+        chunks,
+        embeddings
     )
 
-
-    # Create FAISS vector store
-    print("Creating vector store...")
-
-    vector_store = create_vector_store(chunks)
-
-    print("Vector store created")
-
-
-    # Create retriever
     retriever = create_retriever(vector_store)
-
-    print("Retriever ready")
-
-
-    # Create Gemini
-    print("Loading Gemini...")
 
     llm = create_llm()
 
-    print("Gemini ready")
+    chat_history = InMemoryChatMessageHistory()
 
-
-    # Create RAG chain
     rag_chain = create_rag_chain(
         retriever,
         llm,
         chat_history
     )
 
-    print("RAG chain ready")
+    return rag_chain, chat_history, len(chunks)
 
 
-    # Ask question
-    while True:
+def ask_question(rag_chain, chat_history, question):
 
-        question = input("\nYou: ")
+    answer = rag_chain.invoke(question)
 
-        if question.lower() in ["exit", "quit", "q"]:
-            print("Exiting...")
-            break
+    chat_history.add_message(
+        HumanMessage(content=question)
+    )
 
-        answer = rag_chain.invoke(question)
+    chat_history.add_message(
+        AIMessage(content=answer)
+    )
 
-        chat_history.add_message(
-            HumanMessage(content=question)
-        )
+    return answer
 
-        chat_history.add_message(
-            AIMessage(content=answer)
-        )
-
-        print("\nAI:")
-        print(answer)
-
-if __name__ == "__main__":
-    main()
