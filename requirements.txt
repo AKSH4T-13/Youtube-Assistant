@@ -5,7 +5,12 @@ langchain
 langchain-community
 langchain-core
 langchain-text-splitters
-langchain-google-genai
+langchain-groq
 sentence-transformers
 faiss-cpu
 torch
+torchvision
+yt-dlp[default]
+faster-whisper
+easyocr
+opencv-python-headless

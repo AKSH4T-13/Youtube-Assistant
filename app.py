@@ -1,6 +1,20 @@
 import streamlit as st
 
-from main import initialize_rag, ask_question
+import importlib
+import inspect
+import extractors
+import main as backend
+
+# Streamlit reruns this file but can retain older imported backend modules.
+# Refresh only outdated signatures, preserving loaded models on normal reruns.
+if "force_ocr" not in inspect.signature(extractors.extract_fallback_content).parameters:
+    importlib.reload(extractors)
+if ("force_ocr" not in inspect.signature(backend.initialize_rag).parameters
+        or backend.extract_fallback_content is not extractors.extract_fallback_content):
+    importlib.reload(backend)
+
+initialize_rag = backend.initialize_rag
+ask_question = backend.ask_question
 
 
 st.set_page_config(
@@ -81,6 +95,13 @@ youtube_url = st.text_input(
 )
 
 
+extraction_mode = st.selectbox("Content extraction", ["Automatic", "Slides only (OCR)"])
+
+with st.expander("Slide reading settings"):
+    ocr_language = st.selectbox("Slide language", ["English", "Hindi + English"])
+    ocr_interval = st.select_slider("Read a frame every (seconds)", options=[2, 3, 5], value=5)
+    st.caption("English uses a smaller recognition model. Longer intervals process fewer frames but may miss short slides.")
+
 if st.button("Load Video", use_container_width=True):
 
     if not youtube_url.strip():
@@ -91,12 +112,17 @@ if st.button("Load Video", use_container_width=True):
 
         try:
 
-            with st.spinner(
-                "Fetching transcript and building knowledge base..."
-            ):
+            with st.status("Loading video...", expanded=True) as status:
+
+                progress = st.empty()
+                details = {}
 
                 rag_chain, chat_history, chunk_count = initialize_rag(
-                    youtube_url
+                    youtube_url, progress_callback=progress.text,
+                    ocr_languages=("en",) if ocr_language == "English" else ("en", "hi"),
+                    ocr_interval=ocr_interval,
+                    extraction_details=details,
+                    force_ocr=extraction_mode == "Slides only (OCR)",
                 )
 
                 st.session_state.rag_chain = rag_chain
@@ -106,6 +132,9 @@ if st.button("Load Video", use_container_width=True):
                 st.session_state.video_url = youtube_url
 
                 st.session_state.messages = []
+                st.session_state.extraction_details = details
+
+                status.update(label="Video ready", state="complete", expanded=False)
 
             st.success(
                 f"Video loaded successfully! {chunk_count} chunks created."
@@ -118,6 +147,12 @@ if st.button("Load Video", use_container_width=True):
 
 # Chat section
 if st.session_state.rag_chain:
+
+    details = st.session_state.get("extraction_details", {})
+    st.caption(f"Extraction source: {details.get('source', 'Reload video to see source')}")
+    if details.get("preview"):
+        with st.expander("Extracted text preview"):
+            st.text(details["preview"])
 
     st.divider()
 
