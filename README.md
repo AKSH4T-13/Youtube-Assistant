@@ -4,6 +4,8 @@
 
 ### Turn videos into conversations.
 
+[**Launch Live Demo**](https://youtube-assistant-nwokwyy7xr2e2eqgm8kjoh.streamlit.app/)
+
 Ask questions about YouTube videos using captions, speech, or on-screen slide text — powered by Groq and a local retrieval pipeline.
 
 ![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)
@@ -211,3 +213,4 @@ For OCR testing, ask about specific words or labels visible on a slide and compa
 | `GROQ_API_KEY is missing` | Add the key to `.env` and restart Streamlit |
 
 Whisper, OCR, embeddings, and FAISS run locally. Retrieved passages, conversation history, and your question are sent to Groq for answer generation.
+
